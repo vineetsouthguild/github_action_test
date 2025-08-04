@@ -140,3 +140,9 @@ class TestIntegration:
         fib_numbers = [fibonacci(i) for i in range(1, 8)]  # [1, 1, 2, 3, 5, 8, 13]
         prime_fibs = [num for num in fib_numbers if is_prime(num)]
         assert prime_fibs == [2, 3, 5, 13]
+
+    def test_percentage(self):
+        """Test percentage calculation."""
+        assert self.calc.percentage(100, 50) == 50
+        assert self.calc.percentage(200, 25) == 50
+

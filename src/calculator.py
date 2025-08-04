@@ -67,3 +67,8 @@ def factorial(n):
         for i in range(2, n + 1):
             result *= i
         return result
+
+    def percentage(self, value, percent):
+        """Calculate percentage of a value."""
+        return (value * percent) / 100
+
