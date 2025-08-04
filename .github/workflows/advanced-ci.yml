@@ -1,0 +1,272 @@
+# Advanced GitHub Actions Workflow
+# This workflow demonstrates more advanced features and runs on different events
+name: Advanced CI/CD Pipeline
+
+# Multiple trigger events
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run every day at 2 AM UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch: # Allow manual triggering
+    inputs:
+      test_type:
+        description: "Type of tests to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - unit
+          - integration
+          - performance
+
+# Environment variables
+env:
+  PYTHON_VERSION: "3.11"
+  CACHE_VERSION: v1
+
+jobs:
+  # Job 1: Code Quality and Security
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ env.CACHE_VERSION }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ env.CACHE_VERSION }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit safety black isort mypy
+
+      - name: Code formatting check (Black)
+        run: black --check --diff .
+
+      - name: Import sorting check (isort)
+        run: isort --check-only --diff .
+
+      - name: Type checking (mypy)
+        run: mypy src/ --ignore-missing-imports
+        continue-on-error: true # Don't fail the build on type issues
+
+      - name: Security analysis (Bandit)
+        run: bandit -r src/ -f json -o bandit-report.json
+        continue-on-error: true
+
+      - name: Dependency vulnerability check (Safety)
+        run: safety check --json --output safety-report.json
+        continue-on-error: true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+
+  # Job 2: Multi-Python Testing Matrix
+  test-matrix:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    needs: code-quality
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        exclude:
+          # Exclude some combinations to save CI time
+          - os: windows-latest
+            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.9"
+      fail-fast: false # Don't cancel other jobs if one fails
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest --verbose --junitxml=test-results-${{ matrix.python-version }}.xml --cov=src --cov-report=xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+          path: test-results-*.xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: ${{ matrix.os }}-python${{ matrix.python-version }}
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+
+  # Job 3: Performance Testing
+  performance-test:
+    name: Performance Testing
+    runs-on: ubuntu-latest
+    needs: test-matrix
+    if: ${{ github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'performance' || github.event_name != 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-benchmark
+
+      - name: Run performance tests
+        run: |
+          pytest tests/ -k "not test_" --benchmark-only --benchmark-json=benchmark.json
+        continue-on-error: true
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: benchmark.json
+
+  # Job 4: Documentation and Build
+  docs-and-build:
+    name: Documentation & Build
+    runs-on: ubuntu-latest
+    needs: test-matrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install sphinx sphinx-rtd-theme
+
+      - name: Generate documentation
+        run: |
+          mkdir -p docs
+          sphinx-quickstart -q -p "Calculator" -a "GitHub Actions Learner" -v "1.0" --ext-autodoc docs/
+          echo ".. automodule:: src.calculator\n   :members:" > docs/source/calculator.rst
+          cd docs && make html
+        continue-on-error: true
+
+      - name: Build distribution packages
+        run: |
+          pip install build
+          python -m build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: distribution-packages
+          path: dist/
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v3
+        with:
+          name: documentation
+          path: docs/_build/html/
+
+  # Job 5: Deployment (only on main branch)
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [code-quality, test-matrix, performance-test, docs-and-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: distribution-packages
+          path: dist/
+
+      - name: Deploy to staging
+        run: |
+          echo "🚀 Deploying to staging environment..."
+          echo "📦 Files to deploy:"
+          ls -la dist/
+          echo "✅ Deployment completed successfully!"
+
+      - name: Create release (if tagged)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+  # Job 6: Notification
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+
+    steps:
+      - name: Notify success
+        if: ${{ needs.deploy.result == 'success' }}
+        run: |
+          echo "🎉 Pipeline completed successfully!"
+          echo "✅ All tests passed"
+          echo "🚀 Deployment successful"
+
+      - name: Notify failure
+        if: ${{ needs.deploy.result == 'failure' }}
+        run: |
+          echo "❌ Pipeline failed!"
+          echo "🔍 Check the logs for details"
