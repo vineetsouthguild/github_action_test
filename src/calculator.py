@@ -32,6 +32,10 @@ class Calculator:
         if number < 0:
             raise ValueError("Cannot calculate square root of negative number")
         return number ** 0.5
+    
+    def percentage(self, value, percent):
+        """Calculate percentage of a value."""
+        return (value * percent) / 100
 
 
 def fibonacci(n):

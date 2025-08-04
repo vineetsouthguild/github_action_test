@@ -21,6 +21,8 @@ def main():
     print(f"10 / 5 = {calc.divide(10, 5)}")
     print(f"2 ^ 8 = {calc.power(2, 8)}")
     print(f"√25 = {calc.square_root(25)}")
+    print(f"50% of 200 = {calc.percentage(200, 50)}")
+    print(f"25% of 80 = {calc.percentage(80, 25)}")
     
     # Demonstrate advanced functions
     print("\n🔢 Advanced Functions:")
