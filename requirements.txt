@@ -1,0 +1,10 @@
+# Testing framework
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Code quality tools
+flake8>=6.0.0
+
+# Optional: for more advanced testing features
+pytest-mock>=3.11.0
+pytest-xdist>=3.3.0  # for parallel test execution
